@@ -5,10 +5,10 @@ namespace VSynthApp
 {
     public partial class RecordWindow : Window
     {
-        private AudioEngine engine;
+        private IAudioEngine engine;
         private string tempFile = "voice_input.wav";
 
-        public RecordWindow(AudioEngine engine)
+        public RecordWindow(IAudioEngine engine)
         {
             InitializeComponent();
             this.engine = engine;

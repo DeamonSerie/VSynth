@@ -1,39 +1,52 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
-using System.Windows.Input;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using System.IO;
-using System.Windows;
 
 namespace VSynthApp
 {
     public partial class MainViewModel : ObservableObject
     {
-        private AudioEngine audioEngine;
+        private readonly IAudioEngine audioEngine;
+        private readonly IPhonemeParser phonemeParser;
+        private readonly IProjectStorage projectStorage;
+        private readonly IPathProvider pathProvider;
+        private CancellationTokenSource? playbackCancellation;
 
         [ObservableProperty]
         private string statusText = "Ready. Please record your voice sample.";
 
         [ObservableProperty]
-        private double playheadX = 0;
+        private double playheadX;
 
         [ObservableProperty]
-        private bool isPlaying = false;
+        private bool isPlaying;
 
-        public ObservableCollection<BlockViewModel> Blocks { get; } = new ObservableCollection<BlockViewModel>();
+        [ObservableProperty]
+        private int bpm = 130;
+
+        [ObservableProperty]
+        private int snapPixels = 130;
+
+        public ObservableCollection<BlockViewModel> Blocks { get; } = new();
 
         public MainViewModel()
+            : this(new AudioEngine(), new SimplePhonemeParser(), new JsonProjectStorage(), new DesktopPathProvider())
         {
-            audioEngine = new AudioEngine();
-            
-            // Add some initial blocks for demo or empty slots
-            for (int i = 0; i < 8; i++)
-            {
-                // Blocks.Add(new BlockViewModel(i * 130, 60 * 4)); // Default to C row
-            }
+        }
+
+        public MainViewModel(IAudioEngine audioEngine, IPhonemeParser phonemeParser, IProjectStorage projectStorage, IPathProvider pathProvider)
+        {
+            this.audioEngine = audioEngine;
+            this.phonemeParser = phonemeParser;
+            this.projectStorage = projectStorage;
+            this.pathProvider = pathProvider;
         }
 
         [RelayCommand]
@@ -43,126 +56,156 @@ namespace VSynthApp
             if (recordWindow.ShowDialog() == true)
             {
                 StatusText = "Voice sample recorded and divided.";
-                // Refresh voice samples in blocks if needed
             }
         }
 
         [RelayCommand]
         private void Play()
         {
+            if (IsPlaying) return;
             StatusText = "Playing sequence...";
-            // Logic to play blocks sequentially
-            _ = PlaySequence();
+            playbackCancellation = new CancellationTokenSource();
+            _ = PlaySequence(playbackCancellation.Token);
         }
 
-        private async System.Threading.Tasks.Task PlaySequence()
+        [RelayCommand]
+        private void Stop()
+        {
+            playbackCancellation?.Cancel();
+            IsPlaying = false;
+            PlayheadX = 0;
+            StatusText = "Playback stopped.";
+        }
+
+        private async Task PlaySequence(CancellationToken cancellationToken)
         {
             IsPlaying = true;
             PlayheadX = 0;
             var sortedBlocks = Blocks.OrderBy(b => b.X).ToList();
-            if (sortedBlocks.Count == 0) { IsPlaying = false; return; }
+            if (sortedBlocks.Count == 0)
+            {
+                IsPlaying = false;
+                StatusText = "No blocks to play.";
+                return;
+            }
 
             double currentX = 0;
-            double lastBlockX = sortedBlocks.Last().X + 130;
-            bool playing = true;
+            double lastBlockX = sortedBlocks.Last().X + sortedBlocks.Last().DurationPixels;
 
-            _ = System.Threading.Tasks.Task.Run(async () => {
-                while(playing && PlayheadX < lastBlockX) {
-                    await System.Threading.Tasks.Task.Delay(16);
-                    Application.Current.Dispatcher.Invoke(() => {
-                        PlayheadX += 0.13 * 16;
-                    });
-                }
-                Application.Current.Dispatcher.Invoke(() => { IsPlaying = false; });
-            });
-
-            foreach (var block in sortedBlocks)
+            var playheadTask = Task.Run(async () =>
             {
-                if (block.X > currentX)
+                while (!cancellationToken.IsCancellationRequested && PlayheadX < lastBlockX)
                 {
-                    int delayMs = (int)((block.X - currentX) * (1000.0 / 130.0));
-                    await System.Threading.Tasks.Task.Delay(delayMs);
-                    currentX = block.X;
-                }
-
-                if (!string.IsNullOrWhiteSpace(block.SelectedVoice) && block.SelectedVoice != "None")
-                {
-                    var pitches = GetChordPitches(block.Y, block.SelectedModifier, block.SelectedChordType);
-                    string text = block.SelectedVoice.ToUpper();
-                    
-                    _ = System.Threading.Tasks.Task.Run(async () =>
+                    await Task.Delay(16, cancellationToken);
+                    Application.Current.Dispatcher.Invoke(() =>
                     {
-                        foreach (char letter in text)
-                        {
-                            if (letter >= 'A' && letter <= 'Z')
-                            {
-                                foreach (var pitch in pitches)
-                                {
-                                    audioEngine.PlayLetter(letter, pitch);
-                                }
-                                await System.Threading.Tasks.Task.Delay(150);
-                            }
-                        }
+                        PlayheadX += PixelsPerMs() * 16;
                     });
                 }
+            }, cancellationToken);
+
+            try
+            {
+                foreach (var block in sortedBlocks)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    if (block.X > currentX)
+                    {
+                        int delayMs = (int)((block.X - currentX) / PixelsPerMs());
+                        await Task.Delay(delayMs, cancellationToken);
+                        currentX = block.X;
+                    }
+
+                    var letters = phonemeParser.ParseToLetters(block.SelectedVoice);
+                    if (letters.Count == 0) continue;
+
+                    var pitches = GetChordPitches(block.Y, block.SelectedModifier, block.SelectedChordType);
+                    foreach (char letter in letters)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        foreach (var pitch in pitches)
+                        {
+                            audioEngine.PlayLetter(letter, pitch);
+                        }
+
+                        await Task.Delay(150, cancellationToken);
+                    }
+                }
+
+                StatusText = "Playback finished.";
             }
-            playing = false;
-            IsPlaying = false;
-            StatusText = "Playback finished.";
+            catch (OperationCanceledException)
+            {
+                StatusText = "Playback cancelled.";
+            }
+            finally
+            {
+                IsPlaying = false;
+                await SafeAwait(playheadTask);
+            }
+        }
+
+        private static async Task SafeAwait(Task task)
+        {
+            try
+            {
+                await task;
+            }
+            catch
+            {
+            }
+        }
+
+        private double PixelsPerMs()
+        {
+            if (Bpm <= 0) return 0.13;
+            // 130 px = quarter note
+            return SnapPixels / (60000.0 / Bpm);
         }
 
         private List<float> GetChordPitches(double y, string modifier, string chordType)
         {
             float root = GetPitch(y, modifier);
             var pitches = new List<float> { root };
-
-            // Very simplified chord intervals (semitones)
-            // Major: 0, 4, 7
-            // Minor: 0, 3, 7
-            // 7th: 0, 4, 7, 10
             float semitone = 1.05946f;
 
             if (chordType == "Major" || chordType == "7th" || chordType == "Major7")
-                pitches.Add(root * (float)Math.Pow(semitone, 4)); // Major 3rd
+                pitches.Add(root * (float)Math.Pow(semitone, 4));
             else if (chordType == "Minor" || chordType == "Diminished")
-                pitches.Add(root * (float)Math.Pow(semitone, 3)); // Minor 3rd
+                pitches.Add(root * (float)Math.Pow(semitone, 3));
             else if (chordType == "Augmented")
                 pitches.Add(root * (float)Math.Pow(semitone, 4));
 
             if (chordType == "Major" || chordType == "Minor" || chordType == "7th" || chordType == "Major7")
-                pitches.Add(root * (float)Math.Pow(semitone, 7)); // Perfect 5th
+                pitches.Add(root * (float)Math.Pow(semitone, 7));
             else if (chordType == "Diminished")
-                pitches.Add(root * (float)Math.Pow(semitone, 6)); // Tritone
+                pitches.Add(root * (float)Math.Pow(semitone, 6));
             else if (chordType == "Augmented")
-                pitches.Add(root * (float)Math.Pow(semitone, 8)); // Sharp 5th
+                pitches.Add(root * (float)Math.Pow(semitone, 8));
 
             if (chordType == "7th")
-                pitches.Add(root * (float)Math.Pow(semitone, 10)); // Minor 7th
+                pitches.Add(root * (float)Math.Pow(semitone, 10));
             else if (chordType == "Major7")
-                pitches.Add(root * (float)Math.Pow(semitone, 11)); // Major 7th
+                pitches.Add(root * (float)Math.Pow(semitone, 11));
 
-            // Limit to max 4 notes as per requirement
             return pitches.Take(4).ToList();
         }
 
         private float GetPitch(double y, string modifier)
         {
-            // Calculate pitch based on Row and Sharp/Flat
-            // A=440Hz baseline
-            // Rows are at 0, 60, 120, 180, 240, 300, 360
-            // G, F, E, D, C, B, A
             int row = (int)(y / 60);
-            float basePitch = 1.0f;
-            switch(row)
+            float basePitch = row switch
             {
-                case 0: basePitch = 1.5f; break; // G
-                case 1: basePitch = 1.4f; break; // F
-                case 2: basePitch = 1.25f; break; // E
-                case 3: basePitch = 1.2f; break; // D
-                case 4: basePitch = 1.0f; break; // C
-                case 5: basePitch = 0.9f; break; // B
-                case 6: basePitch = 0.8f; break; // A
-            }
+                0 => 1.5f,
+                1 => 1.4f,
+                2 => 1.25f,
+                3 => 1.2f,
+                4 => 1.0f,
+                5 => 0.9f,
+                6 => 0.8f,
+                _ => 1.0f
+            };
 
             if (modifier == "#") basePitch *= 1.059f;
             if (modifier == "##") basePitch *= 1.122f;
@@ -173,15 +216,14 @@ namespace VSynthApp
         }
 
         [RelayCommand]
-        private async System.Threading.Tasks.Task Export()
+        private async Task Export()
         {
             StatusText = "Exporting MP3...";
-            string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
-            string outputPath = Path.Combine(desktopPath, "VSynthTrack.mp3");
-            
+            string outputPath = pathProvider.GetDefaultExportPath();
+
             var blockData = Blocks.Select(b => new SequenceBlock
             {
-                BaseNote = 'C', // Placeholder
+                BaseNote = 'C',
                 Y = b.Y,
                 Modifier = b.SelectedModifier,
                 ChordType = b.SelectedChordType,
@@ -190,32 +232,17 @@ namespace VSynthApp
                 Pitches = GetChordPitches(b.Y, b.SelectedModifier, b.SelectedChordType)
             }).ToList();
 
-            await audioEngine.ExportProject(outputPath, blockData);
+            await audioEngine.ExportProject(outputPath, blockData, phonemeParser);
             StatusText = $"Project exported to {outputPath}";
-        }
-
-        [RelayCommand]
-        private void ExportWavs()
-        {
-            StatusText = "Exporting divided wavs...";
-            string exportPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "VSynthExport");
-            if (!Directory.Exists(exportPath)) Directory.CreateDirectory(exportPath);
-            
-            foreach (var file in Directory.GetFiles(audioEngine.SamplePath, "*.wav"))
-            {
-                File.Copy(file, Path.Combine(exportPath, Path.GetFileName(file)), true);
-            }
-            StatusText = $"Wavs exported to {exportPath}";
         }
 
         public void AddBlock(double x, double y)
         {
-            // Snap to grid
-            double snappedX = Math.Floor(x / 130) * 130;
+            double snappedX = Math.Floor(x / SnapPixels) * SnapPixels;
             double snappedY = Math.Floor(y / 60) * 60;
-            
-            if (snappedY > 360) snappedY = 360; // Max row label A
-            if (snappedY < 0) snappedY = 0;   // Max row label G
+
+            if (snappedY > 360) snappedY = 360;
+            if (snappedY < 0) snappedY = 0;
 
             Blocks.Add(new BlockViewModel(snappedX, snappedY));
         }
@@ -234,33 +261,36 @@ namespace VSynthApp
         }
 
         [RelayCommand]
-        private async System.Threading.Tasks.Task Save()
+        private async Task Save()
         {
             StatusText = "Saving Project...";
-            string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "VSynthProject.json");
-            string json = System.Text.Json.JsonSerializer.Serialize(Blocks);
-            await File.WriteAllTextAsync(path, json);
+            string path = pathProvider.GetDefaultProjectPath();
+            await projectStorage.SaveAsync(path, Blocks.ToList());
             StatusText = $"Project saved to {path}";
         }
 
         [RelayCommand]
-        private async System.Threading.Tasks.Task Load()
+        private async Task Load()
         {
             StatusText = "Loading Project...";
-            string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "VSynthProject.json");
-            if (File.Exists(path))
+            string path = pathProvider.GetDefaultProjectPath();
+            if (!File.Exists(path))
             {
-                try
-                {
-                    string json = await File.ReadAllTextAsync(path);
-                    var loadedBlocks = System.Text.Json.JsonSerializer.Deserialize<List<BlockViewModel>>(json);
-                    Blocks.Clear();
-                    foreach (var b in loadedBlocks) Blocks.Add(b);
-                    StatusText = $"Project loaded from {path}";
-                }
-                catch { StatusText = "Failed to load project file."; }
+                StatusText = "Project file not found.";
+                return;
             }
-            else StatusText = "Project file not found.";
+
+            try
+            {
+                var loadedBlocks = await projectStorage.LoadAsync(path);
+                Blocks.Clear();
+                foreach (var b in loadedBlocks) Blocks.Add(b);
+                StatusText = $"Project loaded from {path}";
+            }
+            catch
+            {
+                StatusText = "Failed to load project file.";
+            }
         }
     }
 
@@ -272,8 +302,11 @@ namespace VSynthApp
         [ObservableProperty]
         private double y;
 
+        [ObservableProperty]
+        private double durationPixels = 130;
+
         public string[] Modifiers { get; } = { "Natural", "#", "##", "b", "bb" };
-        
+
         [ObservableProperty]
         private string selectedModifier = "Natural";
 
@@ -287,7 +320,9 @@ namespace VSynthApp
         [ObservableProperty]
         private string selectedVoice = "A";
 
-        public BlockViewModel() { }
+        public BlockViewModel()
+        {
+        }
 
         public BlockViewModel(double x, double y)
         {

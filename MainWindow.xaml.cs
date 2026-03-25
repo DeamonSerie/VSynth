@@ -60,7 +60,7 @@ namespace VSynthApp
             {
                 border.ReleaseMouseCapture();
 
-                double snappedX = Math.Floor(draggingBlock.X / 130) * 130;
+                double snappedX = Math.Floor(draggingBlock.X / viewModel.SnapPixels) * viewModel.SnapPixels;
                 double snappedY = Math.Floor(draggingBlock.Y / 60) * 60;
 
                 if (snappedY > 360) snappedY = 360; 

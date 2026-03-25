@@ -162,6 +162,11 @@
                 <Button Content="Load" Style="{StaticResource GummyButtonStyle}" Command="{Binding LoadCommand}"/>
                 <Button Content="Export MP3" Style="{StaticResource GummyButtonStyle}" Command="{Binding ExportCommand}"/>
                 <Button Content="Play" Style="{StaticResource GummyButtonStyle}" Command="{Binding PlayCommand}" Background="{StaticResource OsuPink}"/>
+                <Button Content="Stop" Style="{StaticResource GummyButtonStyle}" Command="{Binding StopCommand}"/>
+                <TextBlock Text="BPM" VerticalAlignment="Center" Margin="20,0,4,0" Foreground="#AAA"/>
+                <TextBox Width="55" Text="{Binding Bpm, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                <TextBlock Text="Snap(px)" VerticalAlignment="Center" Margin="0,0,4,0" Foreground="#AAA"/>
+                <TextBox Width="70" Text="{Binding SnapPixels, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
             </StackPanel>
         </Border>
 
@@ -204,7 +209,7 @@
                     </ItemsControl.ItemContainerStyle>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Border x:Name="BlockBorder" Width="140" Height="65" Background="{StaticResource OsuPanel}" CornerRadius="18" BorderThickness="3" BorderBrush="{StaticResource OsuPurple}" Margin="2" RenderTransformOrigin="0.5,0.5"
+                            <Border x:Name="BlockBorder" Width="{Binding DurationPixels}" Height="65" Background="{StaticResource OsuPanel}" CornerRadius="18" BorderThickness="3" BorderBrush="{StaticResource OsuPurple}" Margin="2" RenderTransformOrigin="0.5,0.5"
                                     MouseLeftButtonDown="Block_MouseLeftButtonDown"
                                     MouseMove="Block_MouseMove"
                                     MouseLeftButtonUp="Block_MouseLeftButtonUp">
