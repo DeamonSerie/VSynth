@@ -1,0 +1,101 @@
+version: 1
+profile: vsynth_android_touch
+meta:
+  app: VSynth
+  target: Android
+  notes: >-
+    Touch layout for a future Android client. Control IDs are stable so they can be
+    referenced from Kotlin/Jetpack Compose code.
+
+layout:
+  canvas:
+    id: sequencer_canvas
+    gestures:
+      tap: add_block
+      long_press: open_block_editor
+      pan: scroll_timeline
+      pinch: zoom_timeline
+  top_bar:
+    orientation: horizontal
+    controls:
+      - id: record
+        type: button
+        label: Record
+        action: record_voice_bank
+      - id: clear
+        type: button
+        label: Clear
+        action: clear_blocks
+      - id: save
+        type: button
+        label: Save
+        action: save_project
+      - id: load
+        type: button
+        label: Load
+        action: load_project
+      - id: export
+        type: button
+        label: Export MP3
+        action: export_mp3
+      - id: play
+        type: button
+        label: Play
+        action: playback_start
+        accent: primary
+      - id: stop
+        type: button
+        label: Stop
+        action: playback_stop
+      - id: bpm
+        type: stepper
+        label: BPM
+        min: 40
+        max: 240
+        step: 1
+        default: 120
+      - id: snap
+        type: stepper
+        label: Snap
+        min: 5
+        max: 200
+        step: 5
+        default: 40
+
+block_editor:
+  id: note_block_sheet
+  presentation: bottom_sheet
+  fields:
+    - id: modifier
+      type: segmented
+      options: [Natural, '#', '##', b, bb]
+      default: Natural
+    - id: chord_type
+      type: dropdown
+      options: [Major, Minor, Diminished, Augmented, '7th', Major7]
+      default: Major
+    - id: lyric
+      type: text
+      hint: Enter letters or words
+      max_chars: 48
+  actions:
+    - id: delete
+      type: destructive_button
+      label: Delete Block
+      action: remove_block
+
+block_gestures:
+  tap: select_block
+  double_tap: edit_block
+  drag:
+    action: move_block
+    snap_x_source: snap
+    snap_y: 60
+  swipe_left: remove_block
+
+accessibility:
+  min_touch_target_dp: 48
+  haptics:
+    on_add_block: light
+    on_delete_block: medium
+    on_transport_controls: light

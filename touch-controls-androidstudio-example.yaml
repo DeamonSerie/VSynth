@@ -1,0 +1,30 @@
+version: 1
+integration_example:
+  framework: Jetpack Compose
+  usage:
+    - Parse this YAML at app start.
+    - Bind control.id to composable test tags and click handlers.
+    - Map gestures to pointerInput blocks on the sequencer canvas.
+
+binding_map:
+  record: onRecord()
+  clear: onClear()
+  save: onSave()
+  load: onLoad()
+  export: onExportMp3()
+  play: onPlay()
+  stop: onStop()
+  bpm: onBpmChanged(value)
+  snap: onSnapChanged(value)
+  add_block: onCanvasTap(x, y)
+  move_block: onBlockDrag(blockId, x, y)
+  open_block_editor: onOpenBlockEditor(blockId)
+  remove_block: onDeleteBlock(blockId)
+
+validation_rules:
+  - id: bpm_range
+    rule: bpm in [40,240]
+  - id: snap_range
+    rule: snap in [5,200]
+  - id: block_row_snap
+    rule: block.y % 60 == 0
