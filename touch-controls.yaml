@@ -86,7 +86,7 @@ block_editor:
 
 block_gestures:
   tap: select_block
-  double_tap: edit_block
+  double_tap: open_block_editor
   drag:
     action: move_block
     snap_x_source: snap
