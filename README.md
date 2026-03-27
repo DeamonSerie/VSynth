@@ -148,3 +148,15 @@ Smaller snap values allow finer timing placement.
 ## Developer note
 
 The current README focuses on GUI usage so non-technical users can operate the app without inspecting source files.
+
+
+## Android touch control YAML presets
+
+For building an Android APK in Android Studio, this repo now includes touch-control YAML presets:
+
+- `touch-controls.yaml` — canonical touch layout, gestures, and block editor controls.
+- `touch-controls-androidstudio-example.yaml` — integration mapping example for Jetpack Compose handlers.
+
+Full integration documentation is available in `TOUCH_CONTROLS.md`.
+
+These files are intended as source-of-truth config assets you can read from your Android app layer.
